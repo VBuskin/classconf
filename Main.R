@@ -212,7 +212,10 @@ pred_fun <- function(model, test_data, col_index, indices, iterations) {
     means_df <- aggregate(predictions ~ predictions_df$Var, data = predictions_df, FUN = mean)
     
     # Store statistic of interest
-    yhat <- means_df$predictions[1:20]
+    yhat <- means_df$predictions
+    
+    # Store variables values
+    var_values <<- means_df$`predictions_df$Var`  # Add this line to get the variable values
     
     # Function return
    return(yhat)
@@ -222,53 +225,29 @@ pred_fun <- function(model, test_data, col_index, indices, iterations) {
 
 # Define a function that will be used by the boot function to ensure random subsamples
 boot_fn <- function(data, indices) {
+  
   # Sample the data
   sample_data <- data[indices, ]
+  
   # Separate features and response
   X_sample <- sample_data %>% dplyr::select(-y)
   y_sample <- sample_data$y
+  
   # Fit the model on the sampled data
   xgb_model_sample <- xgboost(data = as.matrix(X_sample),
                               label = y_sample,
                               nrounds = 20,
                               objective = "binary:logistic",
                               verbose = 0)
+  
   # Apply the prediction function
   return(pred_fun(xgb_model_sample, X_test, col_index, indices, iterations))
 }
 
-# Perform bootstrap
-boot_results <- boot(data = full_df,
-                     statistic = boot_fn, 
-                     R = iterations)
-
-# Calculate 95% confidence intervals (first element only)
-ci <- boot.ci(boot_results, type = "basic", conf = 0.95)
-
-# Extract the bootstrap statistics
-bootstrap_stats <- boot_results$t
-
-# Compute the basic 95% confidence intervals for each statistic
-ci <- apply(bootstrap_stats, 2, function(x) quantile(x, c(0.025, 0.975), na.rm = TRUE))
-
-# Convert the confidence intervals to a tibble
-ci_tibble <- tibble(
-  original = boot_results$t0,
-  lower = ci[1, ],
-  upper = ci[2, ],
-  variable = X_test[, col_index]
-)
-
-# Return df
-return(ci_tibble)
-  
   # Perform bootstrap
-  boot_results <- boot(data = X_test,
-                       model = xgb_model,
-                       statistic = pred_fun, 
-                       R = iterations,
-                       col_index = 2# Additional function arguments; maybe add everything here?
-  )
+  boot_results <- boot(data = full_df,
+                       statistic = boot_fn, 
+                       R = iterations)
   
   # Calculate 95% confidence intervals (first element only)
   ci <- boot.ci(boot_results, type = "basic", conf = 0.95)
@@ -276,34 +255,20 @@ return(ci_tibble)
   # Extract the bootstrap statistics
   bootstrap_stats <- boot_results$t
   
-  # Extract the bootstrap statistics
-  bootstrap_stats <- boot_results$t
-  
   # Compute the basic 95% confidence intervals for each statistic
   ci <- apply(bootstrap_stats, 2, function(x) quantile(x, c(0.025, 0.975), na.rm = TRUE))
-  
-  # Get the column name using col_index
-  variable_name <- colnames(X_test)[col_index]
-  
-  # Get the unique levels of the variable
-  variable_levels <- unique(X_test[, col_index])
-
   
   # Convert the confidence intervals to a tibble
   ci_tibble <- tibble(
     original = boot_results$t0,
     lower = ci[1, ],
     upper = ci[2, ],
-    variable = X_test[, col_index]
+    variable = var_values,
   )
-  
-  # Add unique variable levels
-  
-  
-  # Should also contain the variable
   
   # Return df
   return(ci_tibble)
+
 }
 
 
@@ -315,12 +280,13 @@ test_cis <- class_ci(data = PimaIndiansDiabetes,
          response = "diabetes",
          col_index = 2,
          model = xgb_model,
-         iterations = 50)
+         iterations = 300)
 
-test_cis$index <- 1:nrow(test_cis)
+test_cis$n <- 1:nrow(test_cis)
 
-ggplot(test_cis, aes(x = index, y = original)) +
+ggplot(test_cis, aes(x = variable, y = original)) +
   geom_point() +
+  geom_smooth(method = "lm") +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
   labs(
     title = "Original Values with Error Bars",
